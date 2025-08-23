@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VideoURLScanner</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>VideoURLScanner</h1>
+        <form action="/scan" method="post">
+            <input type="text" name="video_url" placeholder="Enter TikTok or Pinterest video URL" required>
+            <button type="submit">Scan Video</button>
+        </form>
+
+        {% if results %}
+            <h2>Results:</h2>
+            <ul>
+                {% if results == "❌ Could not download video" %}
+                    <li>{{ results }}</li>
+                {% else %}
+                    {% for url, live in results.items() %}
+                        <li>{{ url }} --> {{ "LIVE ✅" if live else "NOT FOUND ❌" }}</li>
+                    {% endfor %}
+                {% endif %}
+            </ul>
+        {% endif %}
+    </div>
+</body>
+</html>
