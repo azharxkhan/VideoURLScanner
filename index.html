@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>VideoURLScanner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -13,18 +14,9 @@
             <button type="submit">Scan Video</button>
         </form>
 
-        {% if results %}
-            <h2>Results:</h2>
-            <ul>
-                {% if results == "❌ Could not download video" %}
-                    <li>{{ results }}</li>
-                {% else %}
-                    {% for url, live in results.items() %}
-                        <li>{{ url }} --> {{ "LIVE ✅" if live else "NOT FOUND ❌" }}</li>
-                    {% endfor %}
-                {% endif %}
-            </ul>
-        {% endif %}
+        <div id="results">
+            <!-- Results will appear here after scanning -->
+        </div>
     </div>
 </body>
 </html>

@@ -1,28 +1,20 @@
-import os
-import re
-import cv2
-import pytesseract
-import subprocess
-import requests
-from urllib.parse import urlparse
-from fastapi import FastAPI, Form, UploadFile, File
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Form, BackgroundTasks
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.requests import Request
-
-# ---------------- Configuration ----------------
-VIDEO_FILE = "video.mp4"
-TEXT_FILE = "extracted_text.txt"
-URL_DOMAINS = ["com", "net", "org", "io", "co", "edu", "gov", "info", "biz", "me"]
-TESSERACT_CMD = r"/usr/bin/tesseract"
-pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+import os, re, subprocess, cv2, pytesseract, requests
+from urllib.parse import urlparse
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
 
-# ---------------- Functions ----------------
+VIDEO_FILE = "video.mp4"
+TEXT_FILE = "extracted_text.txt"
+URL_DOMAINS = ["com", "net", "org", "io", "co", "edu", "gov", "info", "biz", "me"]
+FRAME_SKIP = 10
+TESSERACT_CMD = r"/usr/bin/tesseract"
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+
+# ---------- Functions ----------
 def delete_old_files():
     for file in [VIDEO_FILE, TEXT_FILE]:
         if os.path.exists(file):
@@ -31,7 +23,7 @@ def delete_old_files():
 def download_video(url, output_file=VIDEO_FILE):
     try:
         subprocess.run(
-            ["yt-dlp", "-f", "bestvideo+bestaudio", "--merge-output-format", "mp4", "-o", output_file, url],
+            ["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4", "-o", output_file, url],
             check=True
         )
         return output_file
@@ -64,38 +56,49 @@ def check_domain_exists(domain):
 
 def extract_text_from_video(video_file):
     cap = cv2.VideoCapture(video_file)
-    frame_count = 0
-    all_text = []
+    if not cap.isOpened():
+        return []
+
     detected_urls = set()
+    frame_count = 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        processed = preprocess_frame(frame)
-        text = pytesseract.image_to_string(processed, config="--oem 3 --psm 6").strip()
-        if text:
-            all_text.append(f"[Frame {frame_count}] {text}")
-            urls = extract_urls_from_text([text])
-            detected_urls.update(urls)
-        frame_count += 24
+        if frame_count % FRAME_SKIP == 0:
+            processed = preprocess_frame(frame)
+            text = pytesseract.image_to_string(processed, config="--oem 3 --psm 6").strip()
+            if text:
+                urls = extract_urls_from_text([text])
+                detected_urls.update(urls)
+        frame_count += 1
     cap.release()
-    with open(TEXT_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(all_text))
     return detected_urls
 
-# ---------------- Routes ----------------
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "results": None})
-
-@app.post("/scan", response_class=HTMLResponse)
-def scan_video(request: Request, video_url: str = Form(...)):
+def process_video(video_url):
     delete_old_files()
     video_file = download_video(video_url)
     if not video_file:
-        return templates.TemplateResponse("index.html", {"request": request, "results": "❌ Could not download video"})
+        return "<h2>❌ Could not download video</h2>"
+
     urls = extract_text_from_video(video_file)
-    results = {}
-    for u in urls:
-        results[u] = check_domain_exists(u)
-    return templates.TemplateResponse("index.html", {"request": request, "results": results})
+    if not urls:
+        return "<h2>⚠️ No URLs/domains found in video text</h2>"
+
+    results_html = "<h2>Results:</h2><ul>"
+    for url in urls:
+        live = check_domain_exists(url)
+        results_html += f"<li>{url} --> {'LIVE ✅' if live else 'NOT FOUND ❌'}</li>"
+    results_html += "</ul>"
+    return results_html
+
+# ---------- Routes ----------
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return FileResponse("index.html")
+
+@app.post("/scan", response_class=HTMLResponse)
+def scan_video(background_tasks: BackgroundTasks, video_url: str = Form(...)):
+    # Run OCR & URL extraction in background thread
+    result_html = process_video(video_url)
+    return HTMLResponse(result_html)
