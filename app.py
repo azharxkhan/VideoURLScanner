@@ -90,6 +90,9 @@ def process_video(video_url):
         live = check_domain_exists(url)
         results_html += f"<li>{url} --> {'LIVE ✅' if live else 'NOT FOUND ❌'}</li>"
     results_html += "</ul>"
+    
+    delete_old_files()
+    
     return results_html
 
 # ---------- Routes ----------
