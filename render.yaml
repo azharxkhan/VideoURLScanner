@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: video-url-scanner-pro
+    env: docker
+    plan: free
+    autoDeploy: true
