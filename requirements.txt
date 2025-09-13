@@ -1,8 +1,4 @@
 fastapi
 uvicorn
 jinja2
-opencv-python
-pytesseract
-requests
 yt-dlp
-python-multipart
