@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Form, BackgroundTasks
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import os, re, subprocess, cv2, pytesseract, requests
+import os, re, subprocess, cv2, pytesseract, requests, tempfile, shutil
 from urllib.parse import urlparse
 
 app = FastAPI()
@@ -9,7 +9,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ---------- Config ----------
 VIDEO_FILE = "video.mp4"
-TEXT_FILE = "extracted_text.txt"
 URL_DOMAINS = ["com", "net", "org", "io", "co", "edu", "gov", "info", "biz", "me"]
 FRAME_SKIP = 10
 TESSERACT_CMD = r"/usr/bin/tesseract"   # inside Docker
@@ -17,27 +16,31 @@ pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 
 # ---------- Helpers ----------
-def delete_old_files():
-    for file in [VIDEO_FILE, TEXT_FILE]:
-        if os.path.exists(file):
-            try:
-                os.remove(file)
-            except Exception:
-                pass
+def delete_file(path: str):
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
 
 
-def download_video(url, output_file=VIDEO_FILE):
+def download_video(url: str, output_file: str | None = None):
+    """Download an MP4 (up to 720p) for clearer OCR while staying budget-friendly."""
+    output_file = output_file or VIDEO_FILE
     try:
         subprocess.run(
             [
                 "yt-dlp",
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-                "-o", output_file,
+                "-f",
+                "best[ext=mp4][height<=720]/best[ext=mp4]/best",
+                "-o",
+                output_file,
+                "--quiet",
                 url,
             ],
-            check=True
+            check=True,
         )
-        return output_file
+        return output_file if os.path.exists(output_file) else None
     except subprocess.CalledProcessError:
         return None
 
@@ -98,24 +101,39 @@ def extract_text_from_video(video_file):
 
 
 def process_video(video_url):
-    delete_old_files()
-    video_file = download_video(video_url)
-    if not video_file:
-        return "<h2>❌ Could not download video</h2>"
+    temp_dir = tempfile.mkdtemp()
+    temp_video = os.path.join(temp_dir, VIDEO_FILE)
 
-    urls = extract_text_from_video(video_file)
-    if not urls:
-        delete_old_files()
-        return "<h2>⚠️ No URLs/domains found in video text</h2>"
+    try:
+        video_file = download_video(video_url, temp_video)
+        if not video_file:
+            return "<h2>❌ Could not download video</h2>"
 
-    results_html = "<h2>Results:</h2><ul>"
-    for url in urls:
-        live = check_domain_exists(url)
-        results_html += f"<li>{url} --> {'LIVE ✅' if live else 'NOT FOUND ❌'}</li>"
-    results_html += "</ul>"
+        urls = extract_text_from_video(video_file)
+        if not urls:
+            return "<h2>⚠️ No URLs/domains found in video text</h2>"
 
-    delete_old_files()
-    return results_html
+        checks = []
+        for url in urls:
+            live = check_domain_exists(url)
+            checks.append((url, live))
+
+        return render_results_html(checks)
+    finally:
+        # Cleanup always, even if OCR or download fails
+        delete_file(temp_video)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def render_results_html(checks: list[tuple[str, bool]]):
+    live_count = sum(1 for _, live in checks if live)
+    total = len(checks)
+    items = "".join(
+        f"<li class='result-item'><span class='pill {'pill-live' if live else 'pill-dead'}'>{'Live' if live else 'Not found'}</span><span class='url'>{url}</span></li>"
+        for url, live in checks
+    )
+    summary = f"<div class='summary'>Checked {total} URL(s) · {live_count} reachable</div>"
+    return f"<div class='results-card'><h2>Results</h2>{summary}<ul>{items}</ul></div>"
 
 
 # ---------- Routes ----------
@@ -125,7 +143,13 @@ def home():
 
 
 @app.post("/scan", response_class=HTMLResponse)
-def scan_video(background_tasks: BackgroundTasks, video_url: str = Form(...)):
+def scan_video(video_url: str = Form(...)):
     # synchronous processing; short videos recommended on free hosts
     result_html = process_video(video_url)
     return HTMLResponse(result_html)
+
+
+@app.get("/health", response_class=JSONResponse)
+def healthcheck():
+    """Lightweight readiness check for hosting platforms like Render."""
+    return {"status": "ok"}
