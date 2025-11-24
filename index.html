@@ -63,27 +63,85 @@
     }
     .muted { opacity: 0.9; }
     .hint { font-size: 0.9rem; opacity: 0.9; }
-    .result-item {
+    .results-shell { margin-top: 16px; }
+    .results-card {
+      margin-top: 12px;
       background: rgba(255,255,255,0.08);
-      padding: 10px 12px;
-      border-radius: 8px;
-      margin-bottom: 8px;
-      word-break: break-all;
+      padding: 14px 16px;
+      border-radius: 12px;
     }
+    .summary { margin-bottom: 10px; font-weight: 600; opacity: 0.9; }
+    .results-card ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    .result-item {
+      background: rgba(255,255,255,0.06);
+      padding: 10px 12px;
+      border-radius: 10px;
+      word-break: break-all;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pill {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #000;
+      background: #ffd166;
+      min-width: 86px;
+      text-align: center;
+    }
+    .pill-live { background: #7ae582; }
+    .pill-dead { background: #ff9f9f; }
+    .url { flex: 1; }
+    .status { margin-top: 8px; font-size: 0.95rem; opacity: 0.9; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+    .ghost-btn {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .ghost-btn:hover { background: rgba(255,255,255,0.18); }
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Video URL Scanner (OCR)</h1>
     <p class="muted">Paste a video URL (Pinterest / TikTok / etc.). The app downloads it temporarily, scans frames with OCR to find text & domains, checks which links are reachable, shows the results, and deletes the video afterwards.</p>
-    <form action="/scan" method="post" onsubmit="return handleEasterEgg(event)">
-      <input type="text" id="video_url" name="video_url" placeholder="Paste video URL (or type 'azhar' 💙)" required />
-      <button type="submit">Scan</button>
-    </form>
-    <p class="hint">Tip: very long videos can time out on free hosts. Short clips work best.</p>
+    <div class="controls">
+      <form id="scan-form" action="/scan" method="post">
+        <input type="text" id="video_url" name="video_url" placeholder="Paste video URL (or type 'azhar' 💙)" required />
+        <button type="submit" id="scan-btn">Scan</button>
+      </form>
+      <button class="ghost-btn" type="button" id="music-toggle">Play music</button>
+    </div>
+    <p class="hint">Tip: very long videos can time out on free hosts. Short clips work best. Downloads favor up to 720p MP4 to keep OCR readable while still budget-friendly for Render.</p>
+    <div class="results-shell">
+      <div class="status" id="status"></div>
+      <div id="results"></div>
+    </div>
   </div>
 
   <script>
+    const form = document.getElementById('scan-form');
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const scanBtn = document.getElementById('scan-btn');
+    const musicToggle = document.getElementById('music-toggle');
+    let audioCtx = null;
+    let padNodes = [];
+
     function handleEasterEgg(e) {
       const val = (document.getElementById('video_url').value || '').trim().toLowerCase();
       if (val === 'azhar') {
@@ -96,6 +154,74 @@
       }
       return true;
     }
+
+    form.addEventListener('submit', async (e) => {
+      if (!handleEasterEgg(e)) return;
+      e.preventDefault();
+
+      statusEl.innerHTML = '<span class="spinner"></span>Downloading, scanning, and cleaning up…';
+      resultsEl.innerHTML = '';
+      scanBtn.disabled = true;
+
+      const formData = new FormData(form);
+      try {
+        const res = await fetch('/scan', { method: 'POST', body: formData });
+        const html = await res.text();
+        resultsEl.innerHTML = html;
+      } catch (err) {
+        resultsEl.innerHTML = '<p>Something went wrong. Please try again.</p>';
+      } finally {
+        statusEl.textContent = '';
+        scanBtn.disabled = false;
+      }
+    });
+
+    function startAmbientPad() {
+      audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+      const createVoice = (frequency, detune = 0) => {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = frequency;
+        osc.detune.value = detune;
+
+        const gain = audioCtx.createGain();
+        gain.gain.value = 0.01;
+
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start();
+        padNodes.push({ osc, gain });
+      };
+
+      createVoice(174.61);  // F3
+      createVoice(220, -8); // A3 slightly detuned
+      createVoice(261.63, 6); // C4 slightly detuned
+    }
+
+    function stopAmbientPad() {
+      padNodes.forEach(({ osc, gain }) => {
+        try {
+          gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
+          osc.stop(audioCtx.currentTime + 0.5);
+        } catch (e) {
+          // best-effort stop
+        }
+      });
+      padNodes = [];
+    }
+
+    musicToggle.addEventListener('click', async () => {
+      try {
+        if (!audioCtx || padNodes.length === 0) {
+          startAmbientPad();
+          musicToggle.textContent = 'Pause music';
+        } else {
+          stopAmbientPad();
+          musicToggle.textContent = 'Play music';
+        }
+      } catch (err) {
+        musicToggle.textContent = 'Play music (tap again)';
+      }
+    });
   </script>
 </body>
 </html>

@@ -7,6 +7,7 @@ A production-ready FastAPI app that:
 - Checks which links are reachable (tries HTTPS, then HTTP)
 - Deletes the downloaded video after processing
 - Responsive UI with fixed backgrounds: `rain-bar.gif` (desktop), `cozy-aesthetic.gif` (mobile)
+- Built-in ambient music via the Web Audio API (no binary audio file needed)
 - Easter egg: type `azhar` in the input and it shows a love message 💙
 
 ## Project Structure
@@ -38,8 +39,10 @@ docker run -p 8000:8000 video-url-scanner-pro
 ## Deploy on Render
 
 - Push this folder to GitHub/GitLab.
-- In Render: **New Web Service** → connect repo → it reads `render.yaml` automatically.
-- The app binds to `$PORT` and runs `uvicorn app:app`.
+- In Render: **New Web Service** → connect repo → it reads `render.yaml` automatically (defaults to the free plan).
+- The app binds to `$PORT` and runs `uvicorn app:app` with a built-in `/health` endpoint for health checks.
+- Video files download into a temp directory and are deleted after each scan, staying within Render's ephemeral disk limits.
+- Requests will time out if a download or scan runs too long; keep clips short for free-tier timeouts.
 
 ## Notes
 
